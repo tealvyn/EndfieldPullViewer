@@ -2,5 +2,6 @@ banners/news.txt
 Beginner.csv
 Limited.csv
 pulls.json
-pulls/Standard.csv
 Standard.csv
+config.txt
+pulls/

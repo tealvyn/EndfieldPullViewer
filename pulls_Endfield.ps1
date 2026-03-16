@@ -1,24 +1,41 @@
 [CmdletBinding()]
 param(
     [string]$CachePath = "$env:LOCALAPPDATA\PlatformProcess\Cache\data_1",
-    [string]$HostName  = "ef-webview.gryphline.com",
-    [string]$OutDir    = "$PSScriptRoot\pulls",
-    [string]$Lang      = "en-us",
-    [string]$SheetsUrl = "https://script.google.com/macros/s/AKfycbzltcCH0tcMNeKBfObcPLKcg-EJz2d-cUslc4O9KvYPDhK79-83rdL7DDtbXTsWS-NO/exec"
+    [string]$HostName = "ef-webview.gryphline.com",
+    [string]$OutDir = "",
+    [string]$Lang = "en-us"
 )
+
+# определяем корневую папку скрипта надёжно
+$ScriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
+
+# и переопредели OutDir если он всё ещё использует пустой PSScriptRoot
+if (-not $OutDir -or $OutDir -eq '\pulls') {
+    $OutDir = Join-Path $ScriptDir "pulls"
+}
+
+$configPath = Join-Path $ScriptDir "config.txt"
+
+if (Test-Path $configPath) {
+    $script:SheetsUrl = (Get-Content $configPath -Raw).Trim()
+}
+else {
+    $script:SheetsUrl = ""
+}
 
 $ErrorActionPreference = "Stop"
 
 try {
     Add-Type -AssemblyName System.Web
-} catch {
+}
+catch {
     Write-Host "Error loading System.Web" -ForegroundColor Red
     return
 }
 
 $Banners = @(
     @{ PoolType = "E_CharacterGachaPoolType_Standard"; Label = "Standard"; HasPity = $true }
-    @{ PoolType = "E_CharacterGachaPoolType_Special";  Label = "Limited";  HasPity = $true }
+    @{ PoolType = "E_CharacterGachaPoolType_Special"; Label = "Limited"; HasPity = $true }
     @{ PoolType = "E_CharacterGachaPoolType_Beginner"; Label = "Beginner"; HasPity = $true }
 )
 
@@ -47,7 +64,8 @@ function Read-CacheContent {
             [System.IO.FileAccess]::Read,
             [System.IO.FileShare]::ReadWrite
         )
-    } catch {
+    }
+    catch {
         Write-Host "Cannot open data_1 (locked by another process)." -ForegroundColor Red
         Write-Host "Try running script while in main menu or right after closing the game." -ForegroundColor Yellow
         return $null
@@ -56,7 +74,8 @@ function Read-CacheContent {
     try {
         $bytes = New-Object byte[] $stream.Length
         [void]$stream.Read($bytes, 0, $bytes.Length)
-    } finally {
+    }
+    finally {
         $stream.Close()
     }
 
@@ -84,7 +103,7 @@ function Get-LatestRecordUrl {
 function Get-TokenAndServer {
     param([string]$RecordUrl)
 
-    $uri   = [Uri]$RecordUrl
+    $uri = [Uri]$RecordUrl
     $query = [System.Web.HttpUtility]::ParseQueryString($uri.Query)
 
     $token = $query["u8_token"]
@@ -103,16 +122,16 @@ function Fetch-AllPulls {
         [string]$PoolType
     )
 
-    $records   = [System.Collections.Generic.List[object]]::new()
+    $records = [System.Collections.Generic.List[object]]::new()
     $lastSeqId = $null
 
     do {
-        $b      = [System.UriBuilder]::new("https", $HostName)
+        $b = [System.UriBuilder]::new("https", $HostName)
         $b.Path = "/api/record/char"
-        $q      = [System.Web.HttpUtility]::ParseQueryString("")
-        $q["lang"]      = $Lang
+        $q = [System.Web.HttpUtility]::ParseQueryString("")
+        $q["lang"] = $Lang
         $q["pool_type"] = $PoolType
-        $q["token"]     = $Token
+        $q["token"] = $Token
         $q["server_id"] = $ServerId
         if ($null -ne $lastSeqId) { $q["seq_id"] = $lastSeqId }
         $b.Query = $q.ToString()
@@ -127,7 +146,8 @@ function Fetch-AllPulls {
             }
 
             $resp = Invoke-RestMethod -Uri $b.Uri.AbsoluteUri -Method Get -TimeoutSec 15 -Headers $headers
-        } catch {
+        }
+        catch {
             Write-Host "  Request error: $_" -ForegroundColor Red
             break
         }
@@ -136,23 +156,23 @@ function Fetch-AllPulls {
 
         foreach ($item in $resp.data.list) {
             $tsSeconds = [long]([string]$item.gachaTs) / 1000
-            $dt        = [DateTimeOffset]::FromUnixTimeSeconds($tsSeconds).LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss")
+            $dt = [DateTimeOffset]::FromUnixTimeSeconds($tsSeconds).LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss")
 
             $records.Add([PSCustomObject]@{
-                SeqID  = [string]$item.seqId
-                Name   = [string]$item.charName
-                Rarity = [int]$item.rarity
-                Time   = $dt
-                Banner = [string]$item.poolName
-                IsFree = [bool]$item.isFree
-            })
+                    SeqID  = [string]$item.seqId
+                    Name   = [string]$item.charName
+                    Rarity = [int]$item.rarity
+                    Time   = $dt
+                    Banner = [string]$item.poolName
+                    IsFree = [bool]$item.isFree
+                })
         }
 
         $lastSeqId = $resp.data.list[-1].seqId
         Start-Sleep -Milliseconds 350
     } while ($resp.data.list.Count -ge 5)
 
-    return ,$records
+    return , $records
 }
 
 function Fetch-WeaponPools {
@@ -161,12 +181,12 @@ function Fetch-WeaponPools {
         [string]$ServerId
     )
 
-    $b      = [System.UriBuilder]::new("https", $HostName)
+    $b = [System.UriBuilder]::new("https", $HostName)
     $b.Path = "/api/record/weapon/pool"
 
     $q = [System.Web.HttpUtility]::ParseQueryString("")
-    $q["lang"]      = $Lang
-    $q["token"]     = $Token
+    $q["lang"] = $Lang
+    $q["token"] = $Token
     $q["server_id"] = $ServerId
     $b.Query = $q.ToString()
 
@@ -180,7 +200,8 @@ function Fetch-WeaponPools {
         }
 
         $resp = Invoke-RestMethod -Uri $b.Uri.AbsoluteUri -Method Get -TimeoutSec 15 -Headers $headers
-    } catch {
+    }
+    catch {
         Write-Host "  Weapon pool request error: $_" -ForegroundColor Red
         return @()
     }
@@ -188,7 +209,7 @@ function Fetch-WeaponPools {
     if ($resp.code -ne 0 -or $null -eq $resp.data) { return @() }
 
     # ожидается массив объектов { poolId, poolName }
-    return ,$resp.data
+    return , $resp.data
 }
 
 function Fetch-AllWeapons {
@@ -201,7 +222,7 @@ function Fetch-AllWeapons {
     $records = [System.Collections.Generic.List[object]]::new()
 
     foreach ($pool in $Pools) {
-        $poolId   = [string]$pool.poolId
+        $poolId = [string]$pool.poolId
         $poolName = [string]$pool.poolName
 
         if ([string]::IsNullOrWhiteSpace($poolId)) { continue }
@@ -209,13 +230,13 @@ function Fetch-AllWeapons {
         $lastSeqId = $null
 
         do {
-            $b      = [System.UriBuilder]::new("https", $HostName)
+            $b = [System.UriBuilder]::new("https", $HostName)
             $b.Path = "/api/record/weapon"
 
             $q = [System.Web.HttpUtility]::ParseQueryString("")
-            $q["lang"]      = $Lang
-            $q["pool_id"]   = $poolId
-            $q["token"]     = $Token
+            $q["lang"] = $Lang
+            $q["pool_id"] = $poolId
+            $q["token"] = $Token
             $q["server_id"] = $ServerId
             if ($null -ne $lastSeqId) { $q["seq_id"] = $lastSeqId }
             $b.Query = $q.ToString()
@@ -230,7 +251,8 @@ function Fetch-AllWeapons {
                 }
 
                 $resp = Invoke-RestMethod -Uri $b.Uri.AbsoluteUri -Method Get -TimeoutSec 15 -Headers $headers
-            } catch {
+            }
+            catch {
                 Write-Host "  Weapon request error: $_" -ForegroundColor Red
                 break
             }
@@ -239,17 +261,17 @@ function Fetch-AllWeapons {
 
             foreach ($item in $resp.data.list) {
                 $tsSeconds = [long]([string]$item.gachaTs) / 1000
-                $dt        = [DateTimeOffset]::FromUnixTimeSeconds($tsSeconds).LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss")
+                $dt = [DateTimeOffset]::FromUnixTimeSeconds($tsSeconds).LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss")
 
                 $records.Add([PSCustomObject]@{
-                    SeqID      = [string]$item.seqId
-                    Time       = $dt
-                    Name       = [string]$item.weaponName
-                    Rarity     = [int]$item.rarity
-                    BannerId   = [string]$poolId
-                    BannerName = [string]$poolName
-                    Type       = "weapon"
-                })
+                        SeqID      = [string]$item.seqId
+                        Time       = $dt
+                        Name       = [string]$item.weaponName
+                        Rarity     = [int]$item.rarity
+                        BannerId   = [string]$poolId
+                        BannerName = [string]$poolName
+                        Type       = "weapon"
+                    })
             }
 
             $lastSeqId = $resp.data.list[-1].seqId
@@ -257,7 +279,7 @@ function Fetch-AllWeapons {
         } while ($resp.data.list.Count -ge 5)
     }
 
-    return ,$records
+    return , $records
 }
 function Get-ExistingSeqIds {
     param([string]$CsvPath)
@@ -275,13 +297,14 @@ function Compute-Pity {
         [bool]$HasPity
     )
 
-    if ($null -eq $Records -or $Records.Count -eq 0) { return ,@() }
+    if ($null -eq $Records -or $Records.Count -eq 0) { return , @() }
 
     $sorted = $Records | Sort-Object @(
         @{ Expression = {
-            if ([string]::IsNullOrWhiteSpace($_.Time)) { [datetime]::MinValue }
-            else { [datetime]$_.Time }
-        }},
+                if ([string]::IsNullOrWhiteSpace($_.Time)) { [datetime]::MinValue }
+                else { [datetime]$_.Time }
+            }
+        },
         @{ Expression = { [long]$_.SeqID } }
     )
 
@@ -291,19 +314,21 @@ function Compute-Pity {
             $free = ($row.IsFree -eq $true -or $row.IsFree -eq "True")
             if ($free) {
                 $row | Add-Member -Force -NotePropertyName Pity -NotePropertyValue "-"
-            } else {
+            }
+            else {
                 $pity++
                 $row | Add-Member -Force -NotePropertyName Pity -NotePropertyValue $pity
                 if ([int]$row.Rarity -ge 6) { $pity = 0 }
             }
         }
-    } else {
+    }
+    else {
         foreach ($row in $sorted) {
             $row | Add-Member -Force -NotePropertyName Pity -NotePropertyValue "-"
         }
     }
 
-    return ,$sorted
+    return , $sorted
 }
 
 function Save-ToCsv {
@@ -318,8 +343,8 @@ function Save-ToCsv {
     $Records | ForEach-Object { $_ | Add-Member -Force -NotePropertyName Index -NotePropertyValue ($i++) }
 
     $Records |
-        Select-Object Index, SeqID, Name, Rarity, Time, Banner, IsFree, Pity |
-        Export-Csv -LiteralPath $CsvPath -NoTypeInformation -Encoding UTF8
+    Select-Object Index, SeqID, Name, Rarity, Time, Banner, IsFree, Pity |
+    Export-Csv -LiteralPath $CsvPath -NoTypeInformation -Encoding UTF8
 }
 
 function Send-Banner {
@@ -328,6 +353,12 @@ function Send-Banner {
         [object[]]$Records
     )
 
+
+    if ([string]::IsNullOrWhiteSpace($script:SheetsUrl)) {
+        Write-Host "  Sheets not configured (no config.txt), skipping." -ForegroundColor Gray
+        return
+    }
+
     if ($Records.Count -eq 0) {
         Write-Host "  Nothing to send." -ForegroundColor Gray
         return
@@ -335,37 +366,38 @@ function Send-Banner {
 
     Write-Host "Sending [$Label] ($($Records.Count) records)..." -ForegroundColor Cyan
 
-    $payload         = @{}
+    $payload = @{}
     $payload[$Label] = @($Records | ForEach-Object {
-        @{
-            SeqID  = $_.SeqID
-            Name   = $_.Name
-            Rarity = $_.Rarity
-            Time   = $_.Time
-            Banner = $_.Banner
-            IsFree = if ($_.IsFree -eq $true -or $_.IsFree -eq "True") { "True" } else { "False" }
-            Pity   = $_.Pity
-        }
-    })
+            @{
+                SeqID  = $_.SeqID
+                Name   = $_.Name
+                Rarity = $_.Rarity
+                Time   = $_.Time
+                Banner = $_.Banner
+                IsFree = if ($_.IsFree -eq $true -or $_.IsFree -eq "True") { "True" } else { "False" }
+                Pity   = $_.Pity
+            }
+        })
 
     $body = $payload | ConvertTo-Json -Depth 5 -Compress
 
     try {
-        $req                  = [System.Net.HttpWebRequest]::Create($SheetsUrl)
-        $req.Method           = "POST"
-        $req.ContentType      = "application/json"
+        $req = [System.Net.HttpWebRequest]::Create($script:SheetsUrl)
+        $req.Method = "POST"
+        $req.ContentType = "application/json"
         $req.AllowAutoRedirect = $false
 
-        $bytes           = [System.Text.Encoding]::UTF8.GetBytes($body)
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($body)
         $req.ContentLength = $bytes.Length
-        $stream          = $req.GetRequestStream()
+        $stream = $req.GetRequestStream()
         $stream.Write($bytes, 0, $bytes.Length)
         $stream.Close()
 
         $httpResp = $null
         try {
             $httpResp = $req.GetResponse()
-        } catch [System.Net.WebException] {
+        }
+        catch [System.Net.WebException] {
             $httpResp = $_.Exception.Response
         }
 
@@ -376,10 +408,12 @@ function Send-Banner {
 
         if ($result.status -eq "ok") {
             Write-Host "  Added: $($result.added)" -ForegroundColor Green
-        } else {
+        }
+        else {
             Write-Host "  Error: $($result.message)" -ForegroundColor Red
         }
-    } catch {
+    }
+    catch {
         Write-Host "  Send error: $_" -ForegroundColor Red
     }
 
@@ -405,7 +439,8 @@ if ([string]::IsNullOrWhiteSpace($recordUrl)) {
 
 try {
     $creds = Get-TokenAndServer -RecordUrl $recordUrl
-} catch {
+}
+catch {
     Write-Host "Token error: $_" -ForegroundColor Red
     Read-Host "Press Enter to exit"
     return
@@ -440,7 +475,8 @@ foreach ($banner in $Banners) {
         $newOnly | ForEach-Object { $newIds[$_.SeqID] = $true }
         $newWithPity = @($allWithPity | Where-Object { $newIds[$_.SeqID] })
         Send-Banner -Label $banner.Label -Records $newWithPity
-    } else {
+    }
+    else {
         Write-Host "  No new records to send." -ForegroundColor Gray
     }
 
@@ -483,35 +519,36 @@ try {
     }
     
     # Пересчитываем Pity для оружия по каждому баннеру отдельно
-if ($allWeapons -and $allWeapons.Count -gt 0) {
-    # группируем по BannerId
-    $grouped = $allWeapons | Group-Object BannerId
+    if ($allWeapons -and $allWeapons.Count -gt 0) {
+        # группируем по BannerId
+        $grouped = $allWeapons | Group-Object BannerId
 
-    $weaponsWithPity = @()
+        $weaponsWithPity = @()
 
-    foreach ($g in $grouped) {
-        # сортируем крутки этого баннера по времени (как строка YYYY-MM-DD HH:mm:ss ок)
-        $items = $g.Group | Sort-Object Time
+        foreach ($g in $grouped) {
+            # сортируем крутки этого баннера по времени (как строка YYYY-MM-DD HH:mm:ss ок)
+            $items = $g.Group | Sort-Object Time
 
-        $pity = 0
-        foreach ($w in $items) {
-            $pity++
+            $pity = 0
+            foreach ($w in $items) {
+                $pity++
 
-            # если это 5★ или 6★ — фиксируем текущий pity и сбрасываем
-            if ($w.Rarity -ge 5) {
-                $w | Add-Member -NotePropertyName Pity -NotePropertyValue $pity -Force
-                $pity = 0
-            } else {
-                $w | Add-Member -NotePropertyName Pity -NotePropertyValue $pity -Force
+                # если это 5★ или 6★ — фиксируем текущий pity и сбрасываем
+                if ($w.Rarity -ge 5) {
+                    $w | Add-Member -NotePropertyName Pity -NotePropertyValue $pity -Force
+                    $pity = 0
+                }
+                else {
+                    $w | Add-Member -NotePropertyName Pity -NotePropertyValue $pity -Force
+                }
+
+                $weaponsWithPity += $w
             }
-
-            $weaponsWithPity += $w
         }
-    }
 
-    # заменяем исходный список на обогащённый
-    $allWeapons = $weaponsWithPity
-}
+        # заменяем исходный список на обогащённый
+        $allWeapons = $weaponsWithPity
+    }
 
     $jsonObject = @{
         characters = $allCharacters
@@ -519,11 +556,12 @@ if ($allWeapons -and $allWeapons.Count -gt 0) {
     }
 
     $jsonPath = Join-Path $OutDir "pulls.json"
-    $json     = $jsonObject | ConvertTo-Json -Depth 6
+    $json = $jsonObject | ConvertTo-Json -Depth 6
     Set-Content -LiteralPath $jsonPath -Value $json -Encoding UTF8
 
     Write-Host "Saved pulls.json ($($allCharacters.Count) chars, $($allWeapons.Count) weapons)." -ForegroundColor Green
-} catch {
+}
+catch {
     Write-Host "Error while building pulls.json: $_" -ForegroundColor Red
 }
 
@@ -531,5 +569,4 @@ Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "All done!" -ForegroundColor Green
 Write-Host "========================================" -ForegroundColor Cyan
 
-Invoke-Item $OutDir
 Read-Host "Press Enter to exit"
