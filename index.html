@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="ru">
+
+<head>
+  <meta charset="UTF-8">
+  <link rel="icon" href="banners/Arknights_Endfield_logo.png" type="image/png">
+  <title>Endfield Pull Viewer</title>
+  <style>
+    :root {
+      --primary-accent: #ffdf5f;
+      /* Цвет золота */
+      --bg-dark: #0d0d0d;
+      --glass-bg: rgba(20, 20, 20, 0.7);
+      --border-color: rgba(255, 255, 255, 0.1);
+      --transition: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    body {
+      background: var(--bg-dark);
+      color: #efefef;
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      margin: 0;
+      /* Новые свойства для фиксации разметки */
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      letter-spacing: 0.02em;
+    }
+
+    header {
+      padding: 0 16px;
+      background: #181818;
+      border-bottom: 1px solid #333;
+      display: flex;
+      align-items: center;
+      gap: 15px;
+      height: 50px;
+      flex-shrink: 0;
+    }
+.header-logo {
+  height: 24px; /* Управляйте размером здесь (уменьшите до 20px, если нужно еще меньше) */
+  width: auto; /* Пропорции сохранятся автоматически */
+  display: block;
+}
+    header h3 {
+      margin: 0;
+      font-size: 18px;
+      white-space: nowrap;
+    }
+
+    main {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    #sidebar {
+      width: 260px;
+      border-right: 1px solid #333;
+      padding: 8px;
+      overflow-y: auto;
+      /* Скролл появится только здесь, если баннеров много */
+      box-sizing: border-box;
+    }
+
+    #content {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      /* ← колонка */
+      overflow: hidden;
+      min-width: 0;
+      position: relative;
+    }
+
+    .banner-group-title {
+      margin: 8px 0 4px;
+      font-size: 13px;
+      color: #aaa;
+      text-transform: uppercase;
+    }
+
+    .banner-btn {
+      transition: var(--transition);
+      border: 1px solid transparent;
+      display: block;
+      width: 100%;
+      text-align: left;
+      padding: 4px 6px;
+      margin-bottom: 2px;
+      background: rgba(255, 255, 255, 0.03);
+      margin-bottom: 4px;
+      cursor: pointer;
+      font-size: 13px;
+      color: #ddd;
+    }
+
+    .banner-btn:hover {
+      background: rgba(255, 255, 255, 0.08);
+      transform: translateX(4px);
+    }
+
+    .banner-btn.active {
+      background: linear-gradient(90deg, rgba(255, 223, 95, 0.15) 0%, rgba(255, 223, 95, 0) 100%);
+      border-left: 3px solid var(--primary-accent);
+      border-color: var(--border-color);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+      table-layout: fixed;
+    }
+
+    #table-wrap {
+      flex: 1;
+      overflow-y: auto;
+      min-height: 0;
+    }
+
+    th,
+    td {
+      border-bottom: 1px solid #333;
+      padding: 5px 8px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    th {
+      background: rgba(24, 24, 24, 0.85) !important;
+      backdrop-filter: blur(10px);
+      position: sticky;
+      top: 0;
+      text-align: left;
+      color: #aaa;
+      font-weight: 600;
+    }
+
+    #summary {
+      padding-top: 20px;
+    }
+
+    /* Фиксированные ширины колонок */
+    th:nth-child(1),
+    td:nth-child(1) {
+      width: 160px;
+    }
+
+    /* Time */
+    th:nth-child(2),
+    td:nth-child(2) {
+      width: auto;
+    }
+
+    /* Name — занимает остаток */
+    th:nth-child(3),
+    td:nth-child(3) {
+      width: 70px;
+      text-align: center;
+    }
+
+    /* Rarity */
+    th:nth-child(4),
+    td:nth-child(4) {
+      width: 70px;
+      text-align: center;
+    }
+
+    /* Pity */
+    th:nth-child(5),
+    td:nth-child(5) {
+      width: 60px;
+      text-align: center;
+    }
+
+    /* Free */
+    th:nth-child(6),
+    td:nth-child(6) {
+      width: 90px;
+      text-align: right;
+    }
+
+    /* SeqID */
+
+    ::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: #111;
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: #333;
+      border-radius: 3px;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+      background: #444;
+    }
+
+    #pulls-table.hide-free #th-free,
+    #pulls-table.hide-free td:nth-child(5) {
+      display: none;
+    }
+
+
+    .rar-6 {
+      color: #ff4949;
+      font-weight: 600;
+    }
+
+    .rar-5 {
+      color: #ffec41;
+      font-weight: 600;
+    }
+
+    #table-wrap {
+      background: transparent;
+    }
+
+    .stats-bar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px 16px;
+      padding: 8px 14px;
+      background: var(--glass-bg) !important;
+      backdrop-filter: blur(15px);
+      /* Эффект матового стекла */
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+      font-size: 13px;
+      box-shadow: 0 4px 30px rgba(0, 0, 0, 0.5);
+    }
+
+    .stat-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-width: 64px;
+    }
+
+    .stat-label {
+      color: #666;
+      font-size: 11px;
+    }
+
+    .stat-value {
+      font-weight: 600;
+      color: #ddd;
+    }
+
+    .stat-value.gold {
+      color: #ffdf5f;
+    }
+
+    .stat-value.purple {
+      color: #d28bff;
+    }
+
+    .stat-value.green {
+      color: #6fcf97;
+    }
+
+    .stat-value.red {
+      color: #eb5757;
+    }
+
+    .stat-value.warn {
+      color: #f2994a;
+    }
+
+    .stat-divider {
+      width: 1px;
+      background: #2a2a2a;
+      align-self: stretch;
+      margin: 0 2px;
+    }
+
+    .overall-block {
+      margin-bottom: 24px;
+    }
+
+    .overall-block h3 {
+      color: #aaa;
+      font-size: 14px;
+      margin: 0 0 8px;
+    }
+
+    .luck-tables {
+      display: flex;
+      gap: 32px;
+    }
+
+    .luck-title {
+      font-size: 12px;
+      font-weight: 600;
+      margin-bottom: 6px;
+    }
+
+    .luck-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 3px 0;
+      border-bottom: 1px solid #1e1e1e;
+      font-size: 13px;
+      min-width: 220px;
+    }
+
+    .luck-pity {
+      font-weight: 600;
+    }
+
+    .green {
+      color: #6fcf97;
+    }
+
+    .red {
+      color: #eb5757;
+    }
+
+    .banner-btn {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
+      padding: 6px 8px;
+      text-align: left;
+    }
+
+    .banner-thumb {
+      width: 56px;
+      height: 32px;
+      object-fit: cover;
+      border-radius: 3px;
+      flex-shrink: 0;
+    }
+
+    #banner-header {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 450px;
+      /* Увеличим высоту для красивого перехода */
+      z-index: 0;
+      overflow: hidden;
+      pointer-events: none;
+    }
+
+    #banner-hero {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      /* Плавное размытие и затемнение к низу через маску */
+      -webkit-mask-image: linear-gradient(to bottom, black 20%, transparent 100%);
+      mask-image: linear-gradient(to bottom, black 20%, transparent 100%);
+      filter: brightness(0.5) blur(2px);
+      /* Сделаем чуть темнее и мягче для читаемости */
+      opacity: 0.8;    }
+
+    #banner-hero-fade { display: none; }
+
+    @keyframes fadeIn {
+      from {
+        opacity: 0;
+        filter: brightness(0) blur(10px);
+      }
+
+      to {
+        opacity: 1;
+        filter: brightness(0.5) blur(2px);
+      }
+    }
+
+    tr {
+      transition: var(--transition);
+    }
+
+    tr:hover {
+      background: rgba(255, 223, 95, 0.05) !important;
+    }
+
+    #banner-hero-fade {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 100px;
+      background: linear-gradient(to bottom, transparent, #0d0d0d);
+      display: none;
+    }
+
+    #summary,
+    #stats-bar,
+    #table-wrap,
+    #overall-section {
+      position: relative;
+      z-index: 1;
+    }
+
+    #btn-overall {
+      background: #222;
+      border: 1px solid #444;
+      color: #fff;
+      padding: 6px 15px;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: var(--transition);
+      margin-left: auto;
+    }
+
+    #btn-overall:hover {
+      background: var(--primary-accent);
+      color: #000;
+    }
+  </style>
+</head>
+
+<body>
+  <header>
+    <img src="banners/Arknights_Endfield_logo.png" class="header-logo" alt="Logo">
+    <h3>Endfield Pull Viewer</h3>
+    <button id="btn-overall" class="tab-btn" onclick="showOverall()">📊 Общая</button>
+  </header>
+  <main>
+    <div id="sidebar">
+      <div class="banner-group-title">Characters</div>
+      <div id="char-banners"></div>
+      <div class="banner-group-title">Weapons</div>
+      <div id="weapon-banners"></div>
+    </div>
+    <div id="content">
+      <div id="banner-header">
+        <img id="banner-hero" src="" alt="" onerror="this.style.display='none'">
+        <div id="banner-hero-fade"></div>
+      </div>
+
+      <div id="summary"></div>
+      <div id="stats-bar" class="stats-bar"></div>
+      <div id="overall-section" style="display:none; padding: 12px 16px;"></div>
+
+      <div id="table-wrap">
+        <table id="pulls-table">
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Name</th>
+              <th>Rarity</th>
+              <th>Pity</th>
+              <th id="th-free">Free</th>
+              <th>SeqID</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+
+  <script src="viewer.js"></script>
+</body>
+
+</html>
