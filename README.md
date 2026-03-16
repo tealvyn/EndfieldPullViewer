@@ -8,5 +8,5 @@
 
 3. Launch the website (for example, using Live Server in VS Code).
 
-<img width="1878" height="932" alt="изображение" src="https://github.com/user-attachments/assets/fa522cf0-9925-445e-b224-83287b249759" />
-   
+https://github.com/user-attachments/assets/ebde55d2-a48c-47b9-9f5d-794cdb544d6c
+
