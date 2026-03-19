@@ -7,12 +7,18 @@ param(
 )
 
 # определяем корневую папку скрипта надёжно
-$ScriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
+$ScriptDir = $PSScriptRoot
+if (-not $ScriptDir) {
+    $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+}
+if (-not $ScriptDir) {
+    $ScriptDir = (Get-Location).Path
+}
 
-# и переопредели OutDir если он всё ещё использует пустой PSScriptRoot
-if (-not $OutDir -or $OutDir -eq '\pulls') {
+if (-not $OutDir -or $OutDir -match '^[A-Za-z]?\\pulls$') {
     $OutDir = Join-Path $ScriptDir "pulls"
 }
+
 
 $configPath = Join-Path $ScriptDir "config.txt"
 
@@ -281,15 +287,6 @@ function Fetch-AllWeapons {
 
     return , $records
 }
-function Get-ExistingSeqIds {
-    param([string]$CsvPath)
-
-    if (-not (Test-Path -LiteralPath $CsvPath)) { return @{} }
-
-    $existing = @{}
-    Import-Csv -LiteralPath $CsvPath | ForEach-Object { $existing[$_.SeqID] = $true }
-    return $existing
-}
 
 function Compute-Pity {
     param(
@@ -329,22 +326,6 @@ function Compute-Pity {
     }
 
     return , $sorted
-}
-
-function Save-ToCsv {
-    param(
-        [object[]]$Records,
-        [string]$CsvPath
-    )
-
-    if ($null -eq $Records -or $Records.Count -eq 0) { return }
-
-    $i = 1
-    $Records | ForEach-Object { $_ | Add-Member -Force -NotePropertyName Index -NotePropertyValue ($i++) }
-
-    $Records |
-    Select-Object Index, SeqID, Name, Rarity, Time, Banner, IsFree, Pity |
-    Export-Csv -LiteralPath $CsvPath -NoTypeInformation -Encoding UTF8
 }
 
 function Send-Banner {
@@ -425,146 +406,155 @@ function Send-Banner {
 Write-Header
 
 $content = Read-CacheContent -Path $CachePath
-if ($null -eq $content) {
-    Read-Host "Press Enter to exit"
-    return
-}
+if ($null -eq $content) { Read-Host "Press Enter to exit"; return }
 
 $recordUrl = Get-LatestRecordUrl -Content $content -Domain $HostName
 if ([string]::IsNullOrWhiteSpace($recordUrl)) {
     Write-Host "No URL with u8_token found in data_1." -ForegroundColor Red
-    Read-Host "Press Enter to exit"
-    return
+    Read-Host "Press Enter to exit"; return
 }
 
-try {
-    $creds = Get-TokenAndServer -RecordUrl $recordUrl
-}
+try { $creds = Get-TokenAndServer -RecordUrl $recordUrl }
 catch {
     Write-Host "Token error: $_" -ForegroundColor Red
-    Read-Host "Press Enter to exit"
-    return
+    Read-Host "Press Enter to exit"; return
 }
 
 Write-Host "Server: $($creds.ServerId)  |  Token: $($creds.Token.Substring(0,8))..." -ForegroundColor Gray
 Write-Host ""
 
-if (-not (Test-Path $OutDir)) {
-    New-Item -ItemType Directory -Path $OutDir | Out-Null
+if (-not (Test-Path $OutDir)) { New-Item -ItemType Directory -Path $OutDir | Out-Null }
+
+$jsonPath = Join-Path $OutDir "pulls.json"
+
+# Загружаем существующий pulls.json если есть
+$existingJson = @{ characters = @(); weapons = @() }
+if (Test-Path $jsonPath) {
+    try {
+        $existingJson = Get-Content $jsonPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        # конвертируем в изменяемые списки
+        $existingJson = @{
+            characters = [System.Collections.Generic.List[object]]($existingJson.characters)
+            weapons    = [System.Collections.Generic.List[object]]($existingJson.weapons)
+        }
+    } catch {
+        Write-Host "Could not read existing pulls.json, starting fresh." -ForegroundColor Yellow
+        $existingJson = @{
+            characters = [System.Collections.Generic.List[object]]::new()
+            weapons    = [System.Collections.Generic.List[object]]::new()
+        }
+    }
+} else {
+    $existingJson = @{
+        characters = [System.Collections.Generic.List[object]]::new()
+        weapons    = [System.Collections.Generic.List[object]]::new()
+    }
 }
 
+# Существующие SeqID персонажей
+$existingCharIds = @{}
+foreach ($c in $existingJson.characters) { $existingCharIds[[string]$c.seqId] = $true }
+
+# Фетчим персонажей
 foreach ($banner in $Banners) {
-    $csvPath = Join-Path $OutDir "$($banner.Label).csv"
-
     Write-Host "[$($banner.Label)]" -ForegroundColor White
-
-    $existing = Get-ExistingSeqIds -CsvPath $csvPath
-
     Write-Host "  Fetching..." -ForegroundColor Cyan -NoNewline
+
     $fetched = Fetch-AllPulls -Token $creds.Token -ServerId $creds.ServerId -PoolType $banner.PoolType
     Write-Host " $($fetched.Count) records." -ForegroundColor Cyan
 
-    $newOnly = @($fetched | Where-Object { -not $existing[$_.SeqID] })
+    $newOnly = @($fetched | Where-Object { -not $existingCharIds[[string]$_.SeqID] })
     Write-Host "  New: $($newOnly.Count)" -ForegroundColor Green
 
-    $allWithPity = Compute-Pity -Records @($fetched) -HasPity $banner.HasPity
-    Save-ToCsv -Records $allWithPity -CsvPath $csvPath
-
     if ($newOnly.Count -gt 0) {
-        $newIds = @{}
-        $newOnly | ForEach-Object { $newIds[$_.SeqID] = $true }
-        $newWithPity = @($allWithPity | Where-Object { $newIds[$_.SeqID] })
-        Send-Banner -Label $banner.Label -Records $newWithPity
-    }
-    else {
-        Write-Host "  No new records to send." -ForegroundColor Gray
+        # Пересчитываем pity для всех записей этого баннера
+        $allForBanner = @($existingJson.characters | Where-Object { $_.bannerId -eq $newOnly[0].Banner }) + $newOnly
+        $allWithPity  = Compute-Pity -Records $allForBanner -HasPity $banner.HasPity
+
+        # Обновляем pity в существующих и добавляем новые
+        $pityMap = @{}
+        foreach ($r in $allWithPity) { $pityMap[[string]$r.SeqID] = $r.Pity }
+
+        foreach ($c in $existingJson.characters) {
+            if ($pityMap.ContainsKey([string]$c.seqId)) { $c.pity = $pityMap[[string]$c.seqId] }
+        }
+
+        foreach ($r in $newOnly) {
+            $existingJson.characters.Add([PSCustomObject]@{
+                seqId      = [string]$r.SeqID
+                time       = $r.Time
+                name       = $r.Name
+                rarity     = [int]$r.Rarity
+                bannerId   = $r.Banner
+                bannerName = $r.Banner
+                isFree     = $r.IsFree
+                pity       = $pityMap[[string]$r.SeqID]
+                type       = "character"
+            })
+            $existingCharIds[[string]$r.SeqID] = $true
+        }
+
+        try { Send-Banner -Label $banner.Label -Records $newOnly }
+        catch { Write-Host "  Send failed but continuing..." -ForegroundColor Yellow }
     }
 
     Write-Host ""
 }
-# Собираем JSON для сайта
 
-try {
-    # персонажи: просто объединяем все баннеры
-    $allCharacters = @()
-    foreach ($banner in $Banners) {
-        $csvPath = Join-Path $OutDir "$($banner.Label).csv"
-        if (Test-Path $csvPath) {
-            $allCharacters += Import-Csv -LiteralPath $csvPath | ForEach-Object {
-                [PSCustomObject]@{
-                    seqId      = $_.SeqID
-                    time       = $_.Time
-                    name       = $_.Name
-                    rarity     = [int]$_.Rarity
-                    bannerId   = $_.Banner      # тут у тебя уже имя/ID баннера
-                    bannerName = $_.Banner
-                    isFree     = ($_.IsFree -eq "True" -or $_.IsFree -eq "true")
-                    pity       = $_.Pity
-                    type       = "character"
-                }
-            }
-        }
-    }
+# Фетчим оружие
+Write-Host "Fetching weapon banners..." -ForegroundColor Cyan
+$weaponPools = Fetch-WeaponPools -Token $creds.Token -ServerId $creds.ServerId
+Write-Host "  Pools: $($weaponPools.Count)" -ForegroundColor Cyan
 
-    # оружие: запрашиваем из API только один раз в конце
-    Write-Host "Fetching weapon banners..." -ForegroundColor Cyan
-    $weaponPools = Fetch-WeaponPools -Token $creds.Token -ServerId $creds.ServerId
-    Write-Host "  Pools: $($weaponPools.Count)" -ForegroundColor Cyan
+if ($weaponPools.Count -gt 0) {
+    Write-Host "Fetching weapon history..." -ForegroundColor Cyan
+    $allWeapons = Fetch-AllWeapons -Token $creds.Token -ServerId $creds.ServerId -Pools $weaponPools
+    Write-Host "  Weapons: $($allWeapons.Count)" -ForegroundColor Cyan
 
-    $allWeapons = @()
-    if ($weaponPools.Count -gt 0) {
-        Write-Host "Fetching weapon history..." -ForegroundColor Cyan
-        $allWeapons = Fetch-AllWeapons -Token $creds.Token -ServerId $creds.ServerId -Pools $weaponPools
-        Write-Host "  Weapons: $($allWeapons.Count)" -ForegroundColor Cyan
-    }
-    
-    # Пересчитываем Pity для оружия по каждому баннеру отдельно
-    if ($allWeapons -and $allWeapons.Count -gt 0) {
-        # группируем по BannerId
+    $existingWeapIds = @{}
+    foreach ($w in $existingJson.weapons) { $existingWeapIds[[string]$w.seqId] = $true }
+
+    $newWeapons = @($allWeapons | Where-Object { -not $existingWeapIds[[string]$_.SeqID] })
+    Write-Host "  New weapons: $($newWeapons.Count)" -ForegroundColor Green
+
+    if ($newWeapons.Count -gt 0) {
+        # Pity по каждому баннеру
         $grouped = $allWeapons | Group-Object BannerId
-
-        $weaponsWithPity = @()
-
+        $pityMap = @{}
         foreach ($g in $grouped) {
-            # сортируем крутки этого баннера по времени (как строка YYYY-MM-DD HH:mm:ss ок)
-            $items = $g.Group | Sort-Object Time
-
             $pity = 0
-            foreach ($w in $items) {
+            foreach ($w in ($g.Group | Sort-Object Time)) {
                 $pity++
-
-                # если это 5★ или 6★ — фиксируем текущий pity и сбрасываем
-                if ($w.Rarity -ge 5) {
-                    $w | Add-Member -NotePropertyName Pity -NotePropertyValue $pity -Force
-                    $pity = 0
-                }
-                else {
-                    $w | Add-Member -NotePropertyName Pity -NotePropertyValue $pity -Force
-                }
-
-                $weaponsWithPity += $w
+                $pityMap[[string]$w.SeqID] = $pity
+                if ($w.Rarity -ge 5) { $pity = 0 }
             }
         }
 
-        # заменяем исходный список на обогащённый
-        $allWeapons = $weaponsWithPity
+        foreach ($w in $newWeapons) {
+            $existingJson.weapons.Add([PSCustomObject]@{
+                seqId      = [string]$w.SeqID
+                time       = $w.Time
+                name       = $w.Name
+                rarity     = [int]$w.Rarity
+                bannerId   = $w.BannerId
+                bannerName = $w.BannerName
+                pity       = $pityMap[[string]$w.SeqID]
+                type       = "weapon"
+            })
+        }
     }
-
-    $jsonObject = @{
-        characters = $allCharacters
-        weapons    = $allWeapons
-    }
-
-    $jsonPath = Join-Path $OutDir "pulls.json"
-    $json = $jsonObject | ConvertTo-Json -Depth 6
-    Set-Content -LiteralPath $jsonPath -Value $json -Encoding UTF8
-
-    Write-Host "Saved pulls.json ($($allCharacters.Count) chars, $($allWeapons.Count) weapons)." -ForegroundColor Green
-}
-catch {
-    Write-Host "Error while building pulls.json: $_" -ForegroundColor Red
 }
 
+# Сохраняем pulls.json
+$jsonObject = @{
+    characters = @($existingJson.characters | Sort-Object { [long]$_.seqId })
+    weapons    = @($existingJson.weapons    | Sort-Object { [long]$_.seqId })
+}
+
+$json = $jsonObject | ConvertTo-Json -Depth 6
+Set-Content -LiteralPath $jsonPath -Value $json -Encoding UTF8
+
+Write-Host "Saved pulls.json ($($existingJson.characters.Count) chars, $($existingJson.weapons.Count) weapons)." -ForegroundColor Green
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "All done!" -ForegroundColor Green
 Write-Host "========================================" -ForegroundColor Cyan

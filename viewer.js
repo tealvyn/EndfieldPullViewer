@@ -1,7 +1,7 @@
 let globalData = {};
 
 async function loadData() {
-  const resp = await fetch('pulls.json');
+  const resp = await fetch('/pulls/pulls.json');
   const data = await resp.json();
   return data;
 }
@@ -21,7 +21,7 @@ function groupByBanner(records) {
     g.items.sort((a, b) => {
       const ta = a.time || '';
       const tb = b.time || '';
-      return ta.localeCompare(tb);
+      return tb.localeCompare(ta);
     });
     const last = g.items[g.items.length - 1];
     g.lastTime = last && last.time ? last.time : '';
@@ -176,7 +176,6 @@ function showOverall() {
   renderOverall(globalData);
 }
 
-// и при клике на любой баннер возвращаем таблицу обратно:
 function showTable() {
   document.getElementById('overall-section').style.display = 'none';
   document.getElementById('pulls-table').style.display = '';
@@ -205,7 +204,7 @@ function renderTable(group, type) {
   const items = group.items.slice().sort((a, b) => {
     const ta = a.time || '';
     const tb = b.time || '';
-    return ta.localeCompare(tb);
+    return tb.localeCompare(ta);
   });
 
 
