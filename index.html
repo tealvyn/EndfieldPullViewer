@@ -3,6 +3,7 @@
 
 <head>
   <meta charset="UTF-8">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
   <link rel="icon" href="banners/Arknights_Endfield_logo.png" type="image/png">
   <title>Endfield Pull Viewer</title>
   <style>
@@ -38,11 +39,36 @@
       height: 50px;
       flex-shrink: 0;
     }
-.header-logo {
-  height: 24px; /* Управляйте размером здесь (уменьшите до 20px, если нужно еще меньше) */
-  width: auto; /* Пропорции сохранятся автоматически */
-  display: block;
-}
+
+    .overall-charts {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin: 16px 0;
+    }
+
+    .chart-wrap {
+      background: rgba(255, 255, 255, 0.04);
+      border-radius: 8px;
+      padding: 12px;
+    }
+
+    .chart-title {
+      font-size: 12px;
+      color: #aaa;
+      margin-bottom: 8px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .header-logo {
+      height: 24px;
+      /* Управляйте размером здесь (уменьшите до 20px, если нужно еще меньше) */
+      width: auto;
+      /* Пропорции сохранятся автоматически */
+      display: block;
+    }
+
     header h3 {
       margin: 0;
       font-size: 18px;
@@ -360,9 +386,12 @@
       mask-image: linear-gradient(to bottom, black 20%, transparent 100%);
       filter: brightness(0.5) blur(2px);
       /* Сделаем чуть темнее и мягче для читаемости */
-      opacity: 0.8;    }
+      opacity: 0.8;
+    }
 
-    #banner-hero-fade { display: none; }
+    #banner-hero-fade {
+      display: none;
+    }
 
     @keyframes fadeIn {
       from {
@@ -400,6 +429,14 @@
     #overall-section {
       position: relative;
       z-index: 1;
+    }
+
+    #overall-section {
+      flex: 1;
+      /* занимает всё доступное место */
+      overflow-y: auto;
+      /* свой скролл */
+      padding: 12px 16px;
     }
 
     #btn-overall {
@@ -441,7 +478,7 @@
 
       <div id="summary"></div>
       <div id="stats-bar" class="stats-bar"></div>
-      <div id="overall-section" style="display:none; padding: 12px 16px;"></div>
+      <div id="overall-section" style="display:none;"></div>
 
       <div id="table-wrap">
         <table id="pulls-table">

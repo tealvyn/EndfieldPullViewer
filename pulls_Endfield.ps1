@@ -468,7 +468,7 @@ foreach ($banner in $Banners) {
 
     if ($newOnly.Count -gt 0) {
         # Пересчитываем pity для всех записей этого баннера
-        $allForBanner = @($existingJson.characters | Where-Object { $_.bannerId -eq $newOnly[0].Banner }) + $newOnly
+        $allForBanner = @($existingJson.characters | Where-Object { $_.poolLabel -eq $banner.Label }) + $newOnly
         $allWithPity  = Compute-Pity -Records $allForBanner -HasPity $banner.HasPity
 
         # Обновляем pity в существующих и добавляем новые
@@ -490,6 +490,7 @@ foreach ($banner in $Banners) {
                 isFree     = $r.IsFree
                 pity       = $pityMap[[string]$r.SeqID]
                 type       = "character"
+                poolLabel  = $banner.Label
             })
             $existingCharIds[[string]$r.SeqID] = $true
         }
